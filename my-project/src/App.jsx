@@ -163,8 +163,9 @@ export default function App() {
 
       <DetailModal 
         item={selectedItem} 
-        allItems={items}
+        user={user}
         onClose={() => setSelectedItem(null)} 
+        onOpenAuth={() => setIsAuthOpen(true)}
       />
 
       <AuthModal 
