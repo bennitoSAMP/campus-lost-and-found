@@ -5,6 +5,7 @@ import ReportModal from './components/ReportModal';
 import DetailModal from './components/DetailModal';
 import AuthModal from './components/AuthModal';
 import ClaimsDashboardModal from './components/ClaimsDashboardModal';
+import AdminPanelModal from './components/AdminPanelModal'; // FIXED TYPO HERE
 import { supabase } from './lib/supabase';
 
 export default function App() {
@@ -13,42 +14,66 @@ export default function App() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-
   const [isClaimsOpen, setIsClaimsOpen] = useState(false);
-  
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+
   const [items, setItems] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Check user session & fetch database items
+  // Fetch items from Supabase with safety fallback
+  const fetchItems = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('items')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Supabase query error:', error.message);
+        // Fallback: Query items without strict filters
+        const { data: fallbackData } = await supabase.from('items').select('*');
+        setItems(fallbackData || []);
+      } else {
+        // Client-side filter for active listings
+        const activeListings = (data || []).filter(
+          (item) => !item.status || item.status === 'ACTIVE'
+        );
+        setItems(activeListings);
+      }
+    } catch (err) {
+      console.error('Unexpected fetch exception:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchItems();
 
-    // Get current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+    // Check current active session
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.warn('Session expired or invalid, resetting session:', error.message);
+        supabase.auth.signOut();
+        setUser(null);
+      } else {
+        setUser(session?.user ?? null);
+      }
     });
 
-    // Listen for auth state changes (login / logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    // Listen for real-time auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        setUser(null);
+      } else if (session) {
+        setUser(session.user);
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
-
-  async function fetchItems() {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('items')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) console.error('Error fetching items:', error);
-    else setItems(data);
-
-    setLoading(false);
-  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -70,26 +95,27 @@ export default function App() {
           type: newItem.type,
           category: newItem.category,
           location: newItem.location,
-          date: 'Just now',
-          secret_detail: newItem.secretDetail,
-          image_url: newItem.imageUrl,
-          user_id: user.id
+          date: newItem.date || new Date().toISOString().split('T')[0],
+          secret_detail: newItem.secret_detail || null,
+          image_url: newItem.image_url || null,
+          user_id: user.id,
+          status: 'ACTIVE'
         }
       ])
       .select();
 
     if (error) {
       alert('Error saving post to database!');
-      console.error(error);
-    } else if (data) {
+      console.error('Database Insert Error:', error);
+    } else if (data && data.length > 0) {
       setItems([data[0], ...items]);
     }
   };
 
   const filteredItems = items.filter((item) => {
     const matchesSearch = 
-      item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.location.toLowerCase().includes(searchTerm.toLowerCase());
+      (item.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.location || '').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesCategory = 
       selectedCategory === 'All' || item.category === selectedCategory;
@@ -97,7 +123,8 @@ export default function App() {
     return matchesSearch && matchesCategory;
   });
 
-  const categories = ['All', 'Electronics', 'Wallets & IDs', 'Keys', 'Apparel & Bags', 'Personal Items'];
+  const categories = ['All', 'Electronics', 'Wallets & IDs', 'Keys', 'Apparel & Bags', 'Books & Notes', 'Other'];
+  const isAdmin = user?.user_metadata?.role === 'admin' || user?.email === 'kervinedgar.bardilas@ctu.edu.ph';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -112,9 +139,12 @@ export default function App() {
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         onOpenClaims={() => setIsClaimsOpen(true)}
+        isAdmin={isAdmin}
+        onOpenAdmin={() => setIsAdminOpen(true)}
       />
 
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {/* Category Pills */}
         <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-6 scrollbar-none">
           {categories.map((cat) => (
             <button
@@ -139,7 +169,7 @@ export default function App() {
         </div>
 
         {loading ? (
-          <div className="text-center py-12 text-slate-500 text-sm">
+          <div className="text-center py-12 text-slate-500 text-sm animate-pulse">
             Loading campus listings...
           </div>
         ) : filteredItems.length > 0 ? (
@@ -159,7 +189,7 @@ export default function App() {
         )}
       </main>
 
-        <ClaimsDashboardModal 
+      <ClaimsDashboardModal 
         isOpen={isClaimsOpen}
         onClose={() => setIsClaimsOpen(false)}
         user={user}
@@ -176,12 +206,19 @@ export default function App() {
         user={user}
         onClose={() => setSelectedItem(null)} 
         onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenClaims={() => setIsClaimsOpen(true)}
       />
 
       <AuthModal 
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onUserAuthenticated={(u) => setUser(u)}
+      />
+
+      <AdminPanelModal 
+        isOpen={isAdminOpen}
+        onClose={() => setIsAdminOpen(false)}
+        onRefreshFeed={fetchItems}
       />
     </div>
   );

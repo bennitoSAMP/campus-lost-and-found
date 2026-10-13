@@ -14,53 +14,64 @@ export default function ReportModal({ isOpen, onClose, onAddItem }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!title || !location) return alert('Please fill in required fields!');
+
+    // Guard against multiple fast clicks
+    if (uploading) return;
+    if (!title.trim() || !location.trim()) return alert('Please fill in required fields!');
 
     setUploading(true);
     let uploadedUrl = null;
 
-    // 1. Upload photo to Supabase Storage if selected
-    if (imageFile) {
-      const fileExt = imageFile.name.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
+    try {
+      // 1. Upload photo to Supabase Storage if selected
+      if (imageFile) {
+        const fileExt = imageFile.name.split('.').pop();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('item-photos')
-        .upload(fileName, imageFile);
+        const { error: uploadError } = await supabase.storage
+          .from('item-photos')
+          .upload(fileName, imageFile);
 
-      if (uploadError) {
-        alert('Error uploading photo!');
-        console.error('Upload Error:', uploadError);
-        setUploading(false);
-        return;
+        if (uploadError) {
+          alert('Error uploading photo! Please check storage permissions.');
+          console.error('Upload Error:', uploadError);
+          setUploading(false);
+          return;
+        }
+
+        // 2. Get Public URL directly
+        const { data } = supabase.storage
+          .from('item-photos')
+          .getPublicUrl(fileName);
+
+        uploadedUrl = data.publicUrl;
       }
 
-      // 2. Get Public URL directly
-      const { data } = supabase.storage
-        .from('item-photos')
-        .getPublicUrl(fileName);
+      // 3. Send complete payload with database-matching snake_case keys
+      await onAddItem({
+        type,
+        title: title.trim(),
+        category,
+        location: location.trim(),
+        secret_detail: type === 'FOUND' ? secretDetail.trim() : null,
+        image_url: uploadedUrl,
+        date: new Date().toISOString().split('T')[0], // YYYY-MM-DD format for matchingEngine
+        status: 'ACTIVE'
+      });
 
-      uploadedUrl = data.publicUrl;
-      console.log("Generated Image Public URL:", uploadedUrl);
+      // Reset form state & close modal
+      setTitle('');
+      setLocation('');
+      setSecretDetail('');
+      setImageFile(null);
+      setType('LOST');
+      onClose();
+    } catch (err) {
+      console.error('Submission Error:', err);
+      alert('Failed to post item. Please try again.');
+    } finally {
+      setUploading(false);
     }
-
-    // 3. Send complete post back to App.jsx with uploadedUrl
-    await onAddItem({
-      type,
-      title,
-      category,
-      location,
-      secretDetail,
-      imageUrl: uploadedUrl // Make sure this key matches!
-    });
-
-    // Reset state & close
-    setTitle('');
-    setLocation('');
-    setSecretDetail('');
-    setImageFile(null);
-    setUploading(false);
-    onClose();
   };
 
   return (
@@ -69,7 +80,11 @@ export default function ReportModal({ isOpen, onClose, onAddItem }) {
         
         <div className="flex justify-between items-center mb-5">
           <h2 className="text-xl font-bold text-slate-800">Report an Item</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2">
+          <button 
+            type="button"
+            onClick={onClose} 
+            className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2"
+          >
             ✕
           </button>
         </div>
@@ -124,6 +139,7 @@ export default function ReportModal({ isOpen, onClose, onAddItem }) {
                 <option>Keys</option>
                 <option>Apparel & Bags</option>
                 <option>Books & Notes</option>
+                <option>Other</option>
               </select>
             </div>
             <div>
@@ -152,13 +168,13 @@ export default function ReportModal({ isOpen, onClose, onAddItem }) {
 
           {/* Secret Security Detail */}
           {type === 'FOUND' && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 animate-in fade-in duration-150">
               <label className="block text-xs font-bold text-emerald-800 mb-1">
                 🔒 Security Detail (Hidden from Public)
               </label>
               <input
                 type="text"
-                placeholder="e.g. Lock screen picture, brand on back..."
+                placeholder="e.g. Lock screen wallpaper, distinct scratch mark..."
                 value={secretDetail}
                 onChange={(e) => setSecretDetail(e.target.value)}
                 className="w-full bg-white border border-emerald-300 rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
