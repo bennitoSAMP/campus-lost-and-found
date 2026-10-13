@@ -4,6 +4,7 @@ import ItemCard from './components/ItemCard';
 import ReportModal from './components/ReportModal';
 import DetailModal from './components/DetailModal';
 import AuthModal from './components/AuthModal';
+import ClaimsDashboardModal from './components/ClaimsDashboardModal';
 import { supabase } from './lib/supabase';
 
 export default function App() {
@@ -12,6 +13,8 @@ export default function App() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+
+  const [isClaimsOpen, setIsClaimsOpen] = useState(false);
   
   const [items, setItems] = useState([]);
   const [user, setUser] = useState(null);
@@ -108,6 +111,7 @@ export default function App() {
         onLogout={handleLogout}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
+        onOpenClaims={() => setIsClaimsOpen(true)}
       />
 
       <main className="max-w-6xl mx-auto px-4 py-8">
@@ -155,6 +159,12 @@ export default function App() {
         )}
       </main>
 
+        <ClaimsDashboardModal 
+        isOpen={isClaimsOpen}
+        onClose={() => setIsClaimsOpen(false)}
+        user={user}
+      />
+        
       <ReportModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
